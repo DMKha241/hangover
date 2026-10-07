@@ -48,11 +48,15 @@ A Discord Server is available for contributors and previous financial supporters
 It provides advanced user support, development discussions and more.
 
 ### Packages
-__Debian__ 11 & 12 & 13 (also usable for Raspbian, Armbian, ...) and __Ubuntu__ 20.04 & 22.04 & 24.04 & 25.10 are attached to the Github Release.
-Install them with
+GitHub Actions produces one generic ARM64 archive, `hangover_<version>_generic_arm64.tar.xz`,
+containing Wine, FEX, Box64 and DXVK. It is built on Ubuntu 22.04 (glibc 2.35).
+Extract it and run Wine from the extracted directory:
 ```bash
-$ sudo apt install ./hangover*.deb
+$ tar -xJf hangover_<version>_arm64.tar.xz
+$ ./hangover_<version>_arm64/bin/wine your_application.exe
 ```
+System libraries such as X11/Wayland, FreeType and Vulkan are still required.
+DXVK DLLs are included in `share/dxvk/`; install them as described below.
 
 __Termux__ packages can be found in the [Termux Repository](https://github.com/termux/termux-packages/tree/master/x11-packages/hangover-wine).
 

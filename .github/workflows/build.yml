@@ -1,0 +1,95 @@
+name: generic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - '**'
+    paths-ignore:
+      - 'benchmarks/**'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'README.md'
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+        submodules: recursive
+
+    - name: Checkout DXVK
+      uses: actions/checkout@v7
+      with:
+        repository: AndreRH/dxvk
+        fetch-tags: true
+        submodules: true
+        fetch-depth: 16
+        path: dxvk
+
+    - name: Get version
+      run: |
+        version=$(git describe --tags --always)
+        echo "HOVERSION=${version#hangover-}" >> "$GITHUB_ENV"
+
+    # Ubuntu 22.04 has the oldest glibc (2.35) in the former build matrix.
+    - name: Cache foundation image
+      id: cache-foundation
+      uses: actions/cache@v6
+      with:
+        path: foundationubuntu2204.tgz
+        key: ${{ runner.os }}-build-cache-foundation-${{ hashFiles('.packaging/ubuntu2204/Dockerfile') }}
+
+    - name: Build foundation image
+      if: steps.cache-foundation.outputs.cache-hit != 'true'
+      run: |
+        docker build -t foundationubuntu2204 -f .packaging/ubuntu2204/Dockerfile .
+        docker image save foundationubuntu2204 | gzip -c > foundationubuntu2204.tgz
+
+    - name: Load foundation image
+      if: steps.cache-foundation.outputs.cache-hit == 'true'
+      run: docker image load -i foundationubuntu2204.tgz
+
+    - name: Build generic archive
+      run: |
+        docker build --build-arg HOVERSION="$HOVERSION" -t hangover-generic -f .packaging/generic/Dockerfile .
+        docker run --rm hangover-generic cat /opt/hangover.tar.xz > "hangover_${HOVERSION}_arm64.tar.xz"
+
+    - name: Check archive contents
+      run: |
+        archive="hangover_${HOVERSION}_arm64.tar.xz"
+        root="hangover_${HOVERSION}_arm64"
+        tar -tJf "$archive" > archive-contents.txt
+        for file in bin/wine bin/wineserver lib/wine/aarch64-windows/libarm64ecfex.dll lib/wine/aarch64-windows/libwow64fex.dll lib/wine/aarch64-windows/wowbox64.dll share/dxvk/x32/d3d11.dll; do
+          grep -Fx "$root/$file" archive-contents.txt
+        done
+        if grep -E '\.deb$|(^|/)DEBIAN(/|$)' archive-contents.txt; then
+          exit 1
+        fi
+
+    - name: Upload archive
+      uses: actions/upload-artifact@v7
+      with:
+        name: hangover_${{ env.HOVERSION }}_arm64.tar.xz
+        path: hangover_${{ env.HOVERSION }}_arm64.tar.xz
+        compression-level: 0
+        retention-days: 14
+        if-no-files-found: error
+
+    - name: Upload release asset
+      if: github.event_name == 'release'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: gh release upload "$RELEASE_TAG" "hangover_${HOVERSION}_arm64.tar.xz" --clobber
